@@ -2,19 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { 
   CloudSun, CloudRain, Sun, Wind, Droplets, Compass, ShieldAlert, 
   FileText, Thermometer, Eye, Calendar, ChevronLeft,
-  Activity, MapPin, X, Printer, Download, Sparkles, Loader2, Waves, Image as ImageIcon, Map, Anchor
+  Activity, MapPin, X, Sparkles, Loader2, Waves, Image as ImageIcon, Map, Anchor, Cloud
 } from 'lucide-react';
 import { YEMEN_STATIONS, CAMA_ALERTS } from '../data/weatherData';
 import { WeatherInfo, AlertMessage } from '../types';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function WeatherDashboard() {
   const [selectedStation, setSelectedStation] = useState<WeatherInfo>(YEMEN_STATIONS[0]);
-  const [liveData, setLiveData] = useState<WeatherInfo>(YEMEN_STATIONS[0]);
+  
+  // 1. فصلنا بيانات النموذج عن بيانات الميتار لمنع تداخلها أبداً
+  const [modelWeather, setModelWeather] = useState<WeatherInfo>(YEMEN_STATIONS[0]);
+  const [metarData, setMetarData] = useState<any>(null);
+  
   const [marineData, setMarineData] = useState<{ wave: number, state: string } | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   
-  // 6 Main Bulletins Categories
   const [bulletins, setBulletins] = useState({
     dailyWeather: null as any,
     dailyMarine: null as any,
@@ -31,14 +34,25 @@ export default function WeatherDashboard() {
   const currentAlert = CAMA_ALERTS[alertIndex];
   const nextAlert = () => setAlertIndex((prev) => (prev + 1) % CAMA_ALERTS.length);
 
-  // 1. Fetch Live Weather Data (Direct METAR + ECMWF + Marine)
+  // دمج البيانات الذكي للواجهة (الأولوية دائماً للميتار)
+  const displayTemp = metarData?.temp !== undefined ? metarData.temp : modelWeather.temp;
+  const displayWindSpeed = metarData?.windSpeed !== undefined ? metarData.windSpeed : modelWeather.windSpeed;
+  const displayWindDir = metarData?.windDirection || modelWeather.windDirection;
+  const displayPressure = metarData?.pressure !== undefined ? metarData.pressure : modelWeather.pressure;
+  const displayVisibility = metarData?.visibility !== undefined ? metarData.visibility : modelWeather.visibility;
+  const displayDewPoint = metarData?.dewPoint !== undefined ? metarData.dewPoint : modelWeather.dewPoint;
+  const displayFlightCategory = metarData?.flightCategory || 'VFR';
+  const displayFlightCategoryText = displayFlightCategory === 'VFR' ? 'ملاحة بصرية متاحة' : 'شروط طيران آلي';
+
+  // Fetch Weather Data
   useEffect(() => {
     let isMounted = true;
     
     const fetchRealData = async () => {
       setIsFetching(true);
-      setMarineData(null);
-      let updatedData = { ...selectedStation };
+      setMetarData(null); // تفريغ الميتار السابق عند تغيير المحطة
+      
+      let baseData = { ...selectedStation };
 
       const getStationMeta = (nameEn: string) => {
         const name = nameEn.toLowerCase();
@@ -55,115 +69,115 @@ export default function WeatherDashboard() {
       };
 
       const meta = getStationMeta(selectedStation.nameEn);
-      const fetchPromises = [];
 
-      // Open-Meteo Fetch
+      // 1. تعديل تصنيفات الطقس لمناخ اليمن (منع الغائم كلياً الخاطئ)
+      const mapWmoCode = (code: number) => {
+        if (code === 0) return 'sunny';
+        if (code === 1 || code === 2) return 'partly-cloudy';
+        if (code === 3) return 'partly-cloudy'; // تعديل: سحب متفرقة بدلاً من غائم كلياً
+        if (code >= 45 && code <= 48) return 'dusty';
+        if (code >= 51 && code <= 82) return 'rainy';
+        if (code >= 95) return 'stormy';
+        return 'sunny';
+      };
+
+      const getConditionTextAr = (code: number) => {
+        if (code === 0) return 'صافي ومشمس';
+        if (code === 1 || code === 2) return 'غائم جزئياً';
+        if (code === 3) return 'سحب متفرقة'; // تعديل التسمية
+        if (code >= 45 && code <= 48) return 'غبار معلق';
+        if (code >= 51 && code <= 69) return 'أمطار خفيفة';
+        if (code >= 80 && code <= 82) return 'زخات أمطار';
+        if (code >= 95) return 'عواصف رعدية';
+        return 'مستقر';
+      };
+
+      // جلب بيانات النموذج الأوروبي
       const meteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${meta.lat}&longitude=${meta.lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`;
-      const meteoPromise = fetch(meteoUrl).then(res => res.ok ? res.json() : null).then(meteoData => {
-        if (meteoData) {
-          const mapWmoCode = (code: number) => {
-            if (code === 0) return 'sunny';
-            if (code > 0 && code <= 3) return 'cloudy';
-            if (code >= 45 && code <= 48) return 'dusty';
-            if (code >= 51 && code <= 82) return 'rainy';
-            if (code >= 95) return 'stormy';
-            return 'sunny';
-          };
-          const getConditionTextAr = (code: number) => {
-            if (code === 0) return 'صافي ومشمس';
-            if (code === 1 || code === 2) return 'غائم جزئياً';
-            if (code === 3) return 'غائم كلياً';
-            if (code >= 45 && code <= 48) return 'ضباب/غبار';
-            if (code >= 51 && code <= 69) return 'أمطار خفيفة';
-            if (code >= 80 && code <= 82) return 'زخات أمطار';
-            if (code >= 95) return 'عواصف رعدية';
-            return 'مستقر';
-          };
-
-          updatedData.temp = Math.round(meteoData.current.temperature_2m);
-          updatedData.humidity = Math.round(meteoData.current.relative_humidity_2m);
-          updatedData.windSpeed = Math.round(meteoData.current.wind_speed_10m);
-          updatedData.pressure = Math.round(meteoData.current.surface_pressure);
-          updatedData.conditionType = mapWmoCode(meteoData.current.weather_code);
+      fetch(meteoUrl).then(res => res.ok ? res.json() : null).then(meteoResult => {
+        if (meteoResult && isMounted) {
+          baseData.temp = Math.round(meteoResult.current.temperature_2m);
+          baseData.humidity = Math.round(meteoResult.current.relative_humidity_2m);
+          baseData.windSpeed = Math.round(meteoResult.current.wind_speed_10m);
+          baseData.pressure = Math.round(meteoResult.current.surface_pressure);
+          baseData.conditionType = mapWmoCode(meteoResult.current.weather_code);
+          baseData.conditionAr = getConditionTextAr(meteoResult.current.weather_code);
           
           const currentHour = new Date().getHours();
-          updatedData.hourlyForecast = meteoData.hourly.temperature_2m.slice(currentHour, currentHour + 24).map((t: number, i: number) => ({
-            time: `${(currentHour + i) % 24}:00`, temp: Math.round(t), iconType: mapWmoCode(meteoData.hourly.weather_code[currentHour + i])
+          baseData.hourlyForecast = meteoResult.hourly.temperature_2m.slice(currentHour, currentHour + 24).map((t: number, i: number) => ({
+            time: `${(currentHour + i) % 24}:00`, temp: Math.round(t), iconType: mapWmoCode(meteoResult.hourly.weather_code[currentHour + i])
           }));
 
           const arabicDays = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-          updatedData.dailyForecast = meteoData.daily.temperature_2m_max.slice(1, 6).map((maxT: number, i: number) => {
+          baseData.dailyForecast = meteoResult.daily.temperature_2m_max.slice(1, 6).map((maxT: number, i: number) => {
             const date = new Date(); date.setDate(date.getDate() + i + 1);
-            const wmoCode = meteoData.daily.weather_code[i + 1];
+            const wmoCode = meteoResult.daily.weather_code[i + 1];
             return {
-              dayAr: arabicDays[date.getDay()], tempMax: Math.round(maxT), tempMin: Math.round(meteoData.daily.temperature_2m_min[i + 1]),
+              dayAr: arabicDays[date.getDay()], tempMax: Math.round(maxT), tempMin: Math.round(meteoResult.daily.temperature_2m_min[i + 1]),
               iconType: mapWmoCode(wmoCode), conditionAr: getConditionTextAr(wmoCode)
             };
           });
+          setModelWeather({...baseData});
         }
-      }).catch(e => console.error("Meteo Error:", e));
-      fetchPromises.push(meteoPromise);
+      }).catch(e => console.error(e));
 
-      // Direct METAR Fetch (No Proxy for speed and real-time accuracy)
+      // جلب بيانات الميتار بشكل مستقل
       if (meta.icao) {
-        const metarUrl = `https://aviationweather.gov/api/data/metar?ids=${meta.icao}&format=json`;
-        const metarPromise = fetch(metarUrl).then(res => res.ok ? res.json() : null).then(metarData => {
-          if (metarData && metarData.length > 0) {
-            const latest = metarData[0];
-            if (latest.temp !== null) updatedData.temp = Math.round(latest.temp);
-            if (latest.dewp !== null) updatedData.dewPoint = Math.round(latest.dewp);
-            if (latest.wdir !== null) updatedData.windDirection = `${latest.wdir}°`;
-            if (latest.wspd !== null) updatedData.windSpeed = Math.round(latest.wspd * 1.852);
-            if (latest.altim !== null) updatedData.pressure = Math.round(latest.altim);
-            if (latest.visib !== null) updatedData.visibility = Math.round(latest.visib * 1.609);
-            if (latest.fltcat) {
-              updatedData.flightCategory = latest.fltcat;
-              updatedData.flightCategoryText = latest.fltcat === 'VFR' ? 'ملاحة بصرية متاحة' : 'شروط طيران آلي';
-            }
+        const metarUrl = `https://aviationweather.gov/api/data/metar?ids=${meta.icao}&format=json&hours=4&cb=${Date.now()}`;
+        fetch(metarUrl).then(res => res.ok ? res.json() : null).then(metarResult => {
+          if (metarResult && metarResult.length > 0 && isMounted) {
+            const latest = metarResult[0];
+            setMetarData({
+              temp: latest.temp !== null ? Math.round(latest.temp) : undefined,
+              dewPoint: latest.dewp !== null ? Math.round(latest.dewp) : undefined,
+              windDirection: latest.wdir !== null ? `${latest.wdir}°` : undefined,
+              windSpeed: latest.wspd !== null ? Math.round(latest.wspd * 1.852) : undefined,
+              pressure: latest.altim !== null ? Math.round(latest.altim) : undefined,
+              visibility: latest.visib !== null ? Math.round(latest.visib * 1.609) : undefined,
+              flightCategory: latest.fltcat
+            });
           }
-        }).catch(e => console.error("METAR Direct Error:", e));
-        fetchPromises.push(metarPromise);
+        }).catch(e => console.error(e));
       }
 
-      // Marine Fetch
+      // جلب البيانات البحرية
       if (meta.coastal) {
         const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${meta.lat}&longitude=${meta.lon}&current=wave_height&timezone=auto`;
-        const marinePromise = fetch(marineUrl).then(res => res.ok ? res.json() : null).then(marineJson => {
-          if (marineJson && marineJson.current) {
-            const wave = marineJson.current.wave_height;
+        fetch(marineUrl).then(res => res.ok ? res.json() : null).then(marineResult => {
+          if (marineResult && marineResult.current && isMounted) {
+            const wave = marineResult.current.wave_height;
             let state = 'هادئ';
             if (wave > 0.5) state = 'خفيف الموج';
             if (wave > 1.25) state = 'معتدل';
             if (wave > 2.5) state = 'مضطرب';
-            if (isMounted) setMarineData({ wave, state });
+            setMarineData({ wave, state });
           }
-        }).catch(e => console.error("Marine Error:", e));
-        fetchPromises.push(marinePromise);
+        }).catch(e => console.error(e));
+      } else {
+        setMarineData(null);
       }
 
-      await Promise.allSettled(fetchPromises);
-      
-      if (isMounted) {
-        setLiveData(updatedData);
-        setIsFetching(false);
-      }
+      setTimeout(() => { if (isMounted) setIsFetching(false); }, 1000);
     };
 
     fetchRealData();
     return () => { isMounted = false; };
   }, [selectedStation]);
 
-  // 2. Fetch Facebook RSS & Categorize into 6 Slots
+  // Fetch Facebook RSS (استخدام AllOrigins JSON لتجاوز Netlify بثبات)
   useEffect(() => {
+    let isMounted = true;
+
     const fetchFacebookRSS = async () => {
       try {
         const rssUrl = 'https://rss.app/feeds/gIRd7iserkypQ9i3.xml';
         const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}&cb=${Date.now()}`;
         
         const response = await fetch(proxyUrl);
-        if (!response.ok) return;
-        
         const data = await response.json();
+
+        if (!data.contents) throw new Error("No XML contents received");
+
         const parser = new DOMParser();
         const xml = parser.parseFromString(data.contents, "text/xml");
         const items = Array.from(xml.querySelectorAll("item"));
@@ -183,7 +197,7 @@ export default function WeatherDashboard() {
           const pubDate = item.querySelector("pubDate")?.textContent || "";
           
           const dateObj = new Date(pubDate);
-          const formattedDate = isNaN(dateObj.getTime()) ? "مؤخراً" : dateObj.toLocaleDateString('ar-YE');
+          const formattedDate = isNaN(dateObj.getTime()) ? "الآن" : dateObj.toLocaleDateString('ar-YE');
           
           let extractedImage = "";
           const imgMatch = descHTML.match(/<img[^>]+src="([^">]+)"/);
@@ -200,12 +214,11 @@ export default function WeatherDashboard() {
             fbImage: extractedImage
           };
 
-          // Classification Logic
           const isMarine = combinedText.includes('بحر') || combinedText.includes('موج') || combinedText.includes('صياد') || combinedText.includes('ملاحة');
           const isWeekly = combinedText.includes('أسبوع') || combinedText.includes('اسبوع');
           const isDaily = combinedText.includes('يومي') || combinedText.includes('24 ساعة') || combinedText.includes('خلال') || title.includes('الطقس');
           const isWarning = combinedText.includes('تحذير') || combinedText.includes('إنذار') || combinedText.includes('عاجل') || combinedText.includes('هام');
-          const isSeasonal = combinedText.includes('موسم') || combinedText.includes('مناخ') || combinedText.includes('توقعات فصلية');
+          const isSeasonal = combinedText.includes('موسم') || combinedText.includes('مناخ') || combinedText.includes('فصل');
 
           if (isSeasonal && !extractedBulletins.seasonal) extractedBulletins.seasonal = bulletinObj;
           else if (isWarning && !extractedBulletins.warning) extractedBulletins.warning = bulletinObj;
@@ -215,35 +228,36 @@ export default function WeatherDashboard() {
           else if (isDaily && !isMarine && !extractedBulletins.dailyWeather) extractedBulletins.dailyWeather = bulletinObj;
         });
 
-        setBulletins(extractedBulletins);
-        
+        if (isMounted) {
+          setBulletins(extractedBulletins);
+        }
       } catch (error) {
-        console.error("Facebook RSS Fetch Error:", error);
+        console.error("RSS Fetch Error:", error);
       }
     };
 
     fetchFacebookRSS();
+    return () => { isMounted = false; };
   }, []);
 
   const getConditionIcon = (type: string, sizeClass = "w-10 h-10") => {
     switch (type) {
       case 'sunny': return <Sun className={`${sizeClass} text-amber-400 animate-[spin_40s_linear_infinite] filter drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]`} />;
-      case 'cloudy': return <CloudSun className={`${sizeClass} text-slate-300 filter drop-shadow-[0_0_8px_rgba(203,213,225,0.4)]`} />;
+      case 'partly-cloudy': return <CloudSun className={`${sizeClass} text-slate-200 filter drop-shadow-[0_0_8px_rgba(203,213,225,0.4)]`} />;
+      case 'cloudy': return <Cloud className={`${sizeClass} text-slate-400 filter drop-shadow-[0_0_8px_rgba(148,163,184,0.4)]`} />;
       case 'rainy': return <CloudRain className={`${sizeClass} text-sky-400 animate-bounce filter drop-shadow-[0_0_8px_rgba(56,189,248,0.5)]`} />;
       case 'dusty': return <Wind className={`${sizeClass} text-yellow-600 animate-pulse filter drop-shadow-[0_0_8px_rgba(202,138,4,0.4)]`} />;
-      case 'windy': return <Wind className={`${sizeClass} text-teal-300 filter drop-shadow-[0_0_8px_rgba(115,237,208,0.4)]`} />;
       case 'stormy': return <ShieldAlert className={`${sizeClass} text-red-400 animate-pulse filter drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]`} />;
       default: return <Sun className={`${sizeClass} text-amber-400`} />;
     }
   };
 
-  // Fallback Generation for Empty Bulletins
   const renderBulletinCard = (type: string, data: any, defaultTitle: string, defaultDesc: string, colorClass: string, Icon: any) => {
     const isAvailable = !!data;
-    const item = data || { title: 'بانتظار التحديث من المصدر', date: 'تحديث دوري', summary: defaultDesc };
+    const item = data || { title: 'بانتظار مزامنة البيانات من المنصات الرسمية...', date: 'جاري التحديث', summary: defaultDesc };
     
     return (
-      <div onClick={() => isAvailable && setActiveBulletin({ ...item, typeLabel: defaultTitle })} className={`group relative rounded-2xl p-5 glass-panel border ${colorClass} shadow-md transition-all duration-300 ${isAvailable ? 'cursor-pointer hover:-translate-y-1' : 'opacity-70'} flex flex-col justify-between gap-4 h-full`}>
+      <div onClick={() => isAvailable && setActiveBulletin({ ...item, typeLabel: defaultTitle })} className={`group relative rounded-2xl p-5 glass-panel border ${colorClass} shadow-md transition-all duration-300 ${isAvailable ? 'cursor-pointer hover:-translate-y-1 bg-white/5' : 'opacity-70'} flex flex-col justify-between gap-4 h-full`}>
         <div className={`absolute top-0 right-0 w-16 h-0.5 bg-gradient-to-l ${colorClass.split(' ')[0].replace('border-', 'from-')} to-transparent group-hover:w-full transition-all duration-500`} />
         <div className="space-y-3">
           <div className="flex justify-between items-center">
@@ -268,9 +282,8 @@ export default function WeatherDashboard() {
     );
   };
 
-  // Dedicated Seasonal Fallback to respect methodology
   const getSeasonalFallback = () => ({
-    title: 'تحديث النشرة الموسمية (الاعتماد على النموذج الأوروبي)',
+    title: 'النشرة الموسمية المعتمدة',
     date: 'إصدار فصلي',
     summary: 'يعتمد هذا التقرير في بناء التوقعات على إدخال مخرجات النموذج الأوروبي (ECMWF) كمتغير رئيسي (X)، مع إدخال بيانات درجات حرارة سطح البحر (SST) للفترات السابقة كمتغير (Y).',
     contentAr: 'يعتمد مركز التنبؤات في بناء التوقعات الموسمية الدقيقة على استخدام أداة (CPT). المنهجية المعتمدة تتضمن إدخال مخرجات النموذج الأوروبي (ECMWF) كمتغير رئيسي (X) للموسم الحالي، بالتزامن مع إدخال بيانات درجات حرارة سطح البحر (SST) للفترات السابقة كمتغير (Y)، مما يضمن التقاط الأنماط المناخية بدقة عالية للجمهورية اليمنية.',
@@ -333,10 +346,10 @@ export default function WeatherDashboard() {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold bg-gradient-to-r from-cama-gold to-amber-500 text-royal-blue px-2.5 py-0.5 rounded-md shadow-sm font-sans">محطة رصد رئيسية</span>
-                  <span className="text-xs text-slate-400 font-mono tracking-wider">{liveData.nameEn.split('(')[1]?.replace(')', '')}</span>
+                  <span className="text-xs text-slate-400 font-mono tracking-wider">{modelWeather.nameEn.split('(')[1]?.replace(')', '')}</span>
                 </div>
-                <h2 className="text-5xl font-light text-white mt-2.5 tracking-tight">{liveData.nameAr.split('(')[0]}</h2>
-                <p className="text-xs text-slate-400 mt-1 font-mono tracking-wide">{liveData.nameEn}</p>
+                <h2 className="text-5xl font-light text-white mt-2.5 tracking-tight">{modelWeather.nameAr.split('(')[0]}</h2>
+                <p className="text-xs text-slate-400 mt-1 font-mono tracking-wide">{modelWeather.nameEn}</p>
               </div>
               <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold text-cama-gold shadow-inner font-serif">🇾🇪</div>
             </div>
@@ -344,16 +357,16 @@ export default function WeatherDashboard() {
             <div className="my-8 flex flex-col sm:flex-row items-center justify-between gap-6">
               <div className="flex items-baseline gap-2">
                 <span className="text-8xl font-thin tracking-tighter text-white relative">
-                  {liveData.temp}
+                  {displayTemp}
                   <span className="text-4xl align-top inline-block mt-4 text-cama-gold">°م</span>
                 </span>
                 <div className="mr-6 space-y-1">
-                  <p className="text-xl text-blue-200">{liveData.conditionAr}</p>
-                  <p className="text-xs text-slate-400 font-mono">{liveData.conditionEn}</p>
+                  <p className="text-xl text-blue-200">{modelWeather.conditionAr}</p>
+                  <p className="text-xs text-slate-400 font-mono">{modelWeather.conditionEn}</p>
                 </div>
               </div>
               <div className="flex-shrink-0 flex items-center justify-center p-6 bg-white/5 rounded-full border border-white/10 shadow-lg relative group">
-                {getConditionIcon(liveData.conditionType, "w-16 h-16")}
+                {getConditionIcon(modelWeather.conditionType, "w-16 h-16")}
                 <Sparkles className="w-4 h-4 text-cama-gold absolute top-2 right-2 opacity-50 animate-pulse" />
               </div>
             </div>
@@ -379,35 +392,35 @@ export default function WeatherDashboard() {
                 <span className="text-xs text-slate-300 font-medium">تصنيف الملاحة الجوية بالمطار:</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${liveData.flightCategory === 'VFR' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>{liveData.flightCategory}</span>
-                <span className="text-xs font-bold text-white">{liveData.flightCategoryText}</span>
+                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${displayFlightCategory === 'VFR' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>{displayFlightCategory}</span>
+                <span className="text-xs font-bold text-white">{displayFlightCategoryText}</span>
               </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 border-t border-white/10 pt-6">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Droplets className="w-4.5 h-4.5 text-cyan-400" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">الرطوبة النسبية</p><p className="text-sm font-bold text-slate-100 font-mono">{liveData.humidity}%</p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">الرطوبة النسبية</p><p className="text-sm font-bold text-slate-100 font-mono">{modelWeather.humidity}%</p></div>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Wind className="w-4.5 h-4.5 text-teal-300" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">سرعة واتجاه الرياح</p><p className="text-sm font-bold text-slate-100 font-sans"><span className="font-mono">{liveData.windSpeed}</span> كم/س<span className="text-[10px] block text-slate-400">{liveData.windDirection}</span></p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">سرعة واتجاه الرياح</p><p className="text-sm font-bold text-slate-100 font-sans"><span className="font-mono">{displayWindSpeed}</span> كم/س<span className="text-[10px] block text-slate-400">{displayWindDir}</span></p></div>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Compass className="w-4.5 h-4.5 text-amber-400" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">الضغط الجوي</p><p className="text-sm font-bold text-slate-100 font-mono">{liveData.pressure} hPa</p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">الضغط الجوي</p><p className="text-sm font-bold text-slate-100 font-mono">{displayPressure} hPa</p></div>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Eye className="w-4.5 h-4.5 text-sky-300" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">الرؤية الأفقية</p><p className="text-sm font-bold text-slate-100 font-mono">{liveData.visibility} كم</p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">الرؤية الأفقية</p><p className="text-sm font-bold text-slate-100 font-mono">{displayVisibility} كم</p></div>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Thermometer className="w-4.5 h-4.5 text-amber-500" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">نقطة الندى</p><p className="text-sm font-bold text-slate-100 font-mono">{liveData.dewPoint}°C</p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">نقطة الندى</p><p className="text-sm font-bold text-slate-100 font-mono">{displayDewPoint}°C</p></div>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-slate-300"><Sun className="w-4.5 h-4.5 text-amber-300" /></div>
-                <div><p className="text-[10px] text-slate-400 font-medium">مؤشر الأشعة (UV)</p><p className="text-sm font-bold text-slate-100 font-mono">{liveData.uvIndex}</p></div>
+                <div><p className="text-[10px] text-slate-400 font-medium">مؤشر الأشعة (UV)</p><p className="text-sm font-bold text-slate-100 font-mono">{modelWeather.uvIndex}</p></div>
               </div>
             </div>
 
@@ -418,7 +431,7 @@ export default function WeatherDashboard() {
           <div className="rounded-3xl p-5 glass-panel border border-white/10 shadow-lg space-y-4">
             <h3 className="text-xs font-bold text-cama-gold flex items-center gap-1.5 uppercase tracking-wider text-glow-gold"><Activity className="w-3.5 h-3.5" />التقرير الساعي (٢٤ ساعة)</h3>
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
-              {liveData.hourlyForecast.map((hour, idx) => (
+              {modelWeather.hourlyForecast.map((hour, idx) => (
                 <div key={idx} className="flex-shrink-0 w-20 py-3 rounded-2xl bg-white/5 border border-white/5 hover:border-cama-gold/25 transition-all flex flex-col items-center justify-between gap-2.5 text-center shadow-inner">
                   <span className="text-[10px] text-slate-400 font-medium">{hour.time}</span>
                   <div className="bg-royal-blue/60 p-2 rounded-full border border-white/5">{getConditionIcon(hour.iconType, "w-6 h-6")}</div>
@@ -431,7 +444,7 @@ export default function WeatherDashboard() {
           <div className="rounded-3xl p-5 glass-panel border border-white/10 shadow-lg space-y-4">
             <h3 className="text-xs font-bold text-cama-gold flex items-center gap-1.5 uppercase tracking-wider text-glow-gold"><Calendar className="w-3.5 h-3.5" />توقعات الطقس للخمسة الأيام القادمة</h3>
             <div className="space-y-3">
-              {liveData.dailyForecast.map((day, idx) => (
+              {modelWeather.dailyForecast.map((day, idx) => (
                 <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-bold text-slate-100 min-w-[50px]">{day.dayAr}</span>
@@ -450,7 +463,6 @@ export default function WeatherDashboard() {
         </div>
       </div>
 
-      {/* الخانات الـ 6 المخصصة للنشرات الجوية والبحرية */}
       <div className="space-y-4 pt-4">
         <h3 className="text-base font-extrabold text-white flex items-center gap-2 border-r-2 border-cama-gold pr-2.5">
           <FileText className="w-5 h-5 text-cama-gold" />
@@ -463,8 +475,6 @@ export default function WeatherDashboard() {
           {renderBulletinCard('weeklyWeather', bulletins.weeklyWeather, 'نشرة الطقس الأسبوعية', 'توقعات شاملة للحالة الجوية خلال الأسبوع القادم.', 'border-indigo-500/30 hover:border-indigo-400/50', Calendar)}
           {renderBulletinCard('weeklyMarine', bulletins.weeklyMarine, 'نشرة البحر الأسبوعية', 'توقعات وتوجيهات أسبوعية للصيادين وحركة الملاحة.', 'border-teal-500/30 hover:border-teal-400/50', Waves)}
           {renderBulletinCard('warning', bulletins.warning, 'النشرة التحذيرية', 'إنذارات مبكرة للحالات الجوية القاسية والطارئة.', 'border-red-500/30 hover:border-red-400/50', ShieldAlert)}
-          
-          {/* النشرة الموسمية مع تمرير النص الافتراضي في حال عدم التوفر */}
           {renderBulletinCard('seasonal', bulletins.seasonal || getSeasonalFallback(), 'النشرة الموسمية', 'دراسات وتقارير مناخية فصيلة لتوقعات الأمطار والحرارة.', 'border-cama-gold/40 hover:border-amber-400/60', Map)}
         </div>
       </div>
