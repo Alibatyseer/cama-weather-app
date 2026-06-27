@@ -50,7 +50,7 @@ export default function WeatherDashboard() {
     
     const fetchRealData = async () => {
       setIsFetching(true);
-      setMetarData(null); // تفريغ الميتار السابق عند تغيير المحطة
+      setMetarData(null); 
       
       let baseData = { ...selectedStation };
 
@@ -74,7 +74,7 @@ export default function WeatherDashboard() {
       const mapWmoCode = (code: number) => {
         if (code === 0) return 'sunny';
         if (code === 1 || code === 2) return 'partly-cloudy';
-        if (code === 3) return 'partly-cloudy'; // تعديل: سحب متفرقة بدلاً من غائم كلياً
+        if (code === 3) return 'partly-cloudy'; 
         if (code >= 45 && code <= 48) return 'dusty';
         if (code >= 51 && code <= 82) return 'rainy';
         if (code >= 95) return 'stormy';
@@ -84,7 +84,7 @@ export default function WeatherDashboard() {
       const getConditionTextAr = (code: number) => {
         if (code === 0) return 'صافي ومشمس';
         if (code === 1 || code === 2) return 'غائم جزئياً';
-        if (code === 3) return 'سحب متفرقة'; // تعديل التسمية
+        if (code === 3) return 'سحب متفرقة'; 
         if (code >= 45 && code <= 48) return 'غبار معلق';
         if (code >= 51 && code <= 69) return 'أمطار خفيفة';
         if (code >= 80 && code <= 82) return 'زخات أمطار';
