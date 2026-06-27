@@ -1,0 +1,6 @@
+{
+  "name": "الأرصاد الجوية اليمنية - CAMA",
+  "description": "التطبيق الرسمي للهيئة العامة للطيران المدني والأرصاد الجوية اليمنية لتقديم خدمات الطقس الفاخرة ونشرات الطيران والملاحة البحرية والإنذار المبكر بدقة وموثوقية عالية.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
